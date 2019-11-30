@@ -1,3 +1,15 @@
+TonUINO - MOD
+=============
+## Preamble
+
+This fork contains minor modifications to the original TonUINO 2.01 Master Branch. The customizations are compatible with the original version, which lies in the branch 'original'.
+
+## Modifications
+
+* [Rotary encoder support for volume control](https://github.com/rio-rattenrudel/TonUINO/commit/0fe06bd7d36efe89ffb031aa5ad544dfbe59c382)
+
+* [Simplify card configuration](https://github.com/rio-rattenrudel/TonUINO/commit/b431cc9bab77df17ffcc382613dac93dd7098efc)
+
 # TonUINO
 Die DIY Musikbox (nicht nur) für Kinder
 
