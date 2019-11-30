@@ -184,10 +184,20 @@ uint8_t numberOfCards = 0;
 
 bool isPlaying() { return !digitalRead(busyPin); }
 
+#define CLK 5   // Pin B [D1]
+#define DATA 6  // Pin A [D0]
+
+uint32_t preMS = 0;  
+uint32_t waitMS = 300; 
+
 void setup() {
+
+  pinMode(CLK, INPUT_PULLUP);
+  pinMode(DATA, INPUT_PULLUP);
 
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle
                         // Schnittstelle
+                       
   randomSeed(analogRead(A0)); // Zufallsgenerator initialisieren
 
   Serial.println(F("TonUINO Version 2.0"));
@@ -226,7 +236,35 @@ void setup() {
 
 }
 
+static uint8_t prevNextCode = 0;
+static uint16_t store=0;
+  
+
+// A vald CW or  CCW move returns 1, invalid returns 0.
+int8_t read_rotary() {
+  static int8_t rot_enc_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
+
+  prevNextCode <<= 2;
+  if (digitalRead(DATA)) prevNextCode |= 0x02;
+  if (digitalRead(CLK)) prevNextCode |= 0x01;
+  prevNextCode &= 0x0f;
+
+   // If valid then store as 16 bit data.
+   if  (rot_enc_table[prevNextCode] ) {
+      store <<= 4;
+      store |= prevNextCode;
+      //if (store==0xd42b) return 1;
+      //if (store==0xe817) return -1;
+      if ((store&0xff)==0x2b) return -1;
+      if ((store&0xff)==0x17) return 1;
+   }
+   return 0;
+}
+
 void loop() {
+
+  static int8_t c,val;
+  
   do {
     mp3.loop();
     // Buttons werden nun über JS_Button gehandelt, dadurch kann jede Taste
@@ -280,7 +318,37 @@ void loop() {
         ignoreDownButton = false;
     }
     // Ende der Buttons
-  } while (!mfrc522.PICC_IsNewCardPresent());
+    
+    if( val=read_rotary() ) {
+      //c +=val;
+      //Serial.print(c);Serial.print(" ");
+    
+      if ( prevNextCode==0x0b) {
+        //Serial.print("eleven ");
+        //Serial.println(store,HEX);
+        mp3.increaseVolume();
+      }
+    
+      if ( prevNextCode==0x07) {
+        //Serial.print("seven ");
+        //Serial.println(store,HEX);
+        mp3.decreaseVolume();
+      }
+    }
+
+    // little timer for card check 
+    // should > 30ms (~mfrc522 time), to
+    // give CPU time to do other stuff
+    
+    uint32_t curMS = millis();  
+    if ((curMS - preMS) > waitMS) {
+      preMS = curMS;
+
+      // abort by new card
+      if (mfrc522.PICC_IsNewCardPresent()) break;
+    }
+    
+  } while (true);
 
   // RFID Karte wurde aufgelegt
 
