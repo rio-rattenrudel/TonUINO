@@ -10,6 +10,8 @@ This fork contains minor modifications to the original TonUINO 2.01 Master Branc
 
 * [Simplify card configuration](https://github.com/rio-rattenrudel/TonUINO/commit/b431cc9bab77df17ffcc382613dac93dd7098efc)
 
+![TonUINO Schematic with Rotary Encoder](https://github.com/rio-rattenrudel/TonUINO/blob/master/TonUINO_Schaltplan_Enc.png?raw=true "TonUINO Schematic with Rotary Encoder")
+
 # TonUINO
 Die DIY Musikbox (nicht nur) für Kinder
 
