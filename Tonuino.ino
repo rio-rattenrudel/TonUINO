@@ -9,6 +9,24 @@
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 uint16_t numTracksInFolder;
 uint16_t currentTrack;
+uint8_t  volume = 15;
+uint8_t  ledcc = 0;
+uint8_t  ledinit = 1;
+uint8_t  eq = 0;
+uint16_t eqcc = 0;
+
+// DEBUG
+#define DEBUG_VERBOSE_LEVEL 0
+#define WRITE_WITH_KEY_A    1
+
+// LEDS
+#define BLUE_LED      8
+#define GREEN_LED_RX  1   // INV +5V TTL
+#define YELLOW_LED_TX 0   // INV +5V TTL
+#define ORANGE_LED    A4
+#define AMBER_LED     A3
+#define RED_LED       A5
+#define VOLUME_LED    5   // PWM - ANALOG
 
 // this object stores nfc tag data
 struct nfcTagObject {
@@ -155,6 +173,106 @@ static void previousTrack() {
   }
 }
 
+static void setVolume() {
+  uint8_t val = volume;
+  switch(eq) {
+    case DfMp3_Eq_Pop:      if (val < 30) val++;  break;
+    case DfMp3_Eq_Rock:     if (val > 0)  val--;  break;
+    case DfMp3_Eq_Jazz:     if (val > 0)  val--;  break;
+    case DfMp3_Eq_Bass:     if (val > 0)  val--; 
+                            if (val > 0)  val--;
+                            if (val > 0)  val--;
+                            if (val > 0)  val--;  break;
+  }
+  mp3.setVolume(val);
+}
+
+static void increaseVolume() {
+  uint8_t val;
+  if (volume < 30) {
+    ++volume;
+    setVolume();
+    analogWrite(VOLUME_LED, volume << 3);
+  }
+}
+
+static void decreaseVolume() {
+  uint8_t val;
+  if (volume > 0) {
+    --volume;
+    setVolume();
+    analogWrite(VOLUME_LED, volume << 3);
+  }
+}
+
+static void increaseEQ() {
+  ++eqcc;
+  if (!ledinit && eqcc > 2000) {
+    eqcc = 0;
+
+    switch(eq) {
+      case DfMp3_Eq_Classic:  eq = DfMp3_Eq_Normal;   break;
+      case DfMp3_Eq_Normal:   eq = DfMp3_Eq_Pop;      break;
+      case DfMp3_Eq_Pop:      eq = DfMp3_Eq_Rock;     break;
+      case DfMp3_Eq_Rock:     eq = DfMp3_Eq_Jazz;     break;
+      case DfMp3_Eq_Jazz:     eq = DfMp3_Eq_Bass;     break;
+      case DfMp3_Eq_Bass:     eq = DfMp3_Eq_Classic;  break;
+    }
+   
+    setVolume();
+    mp3.setEq(eq);
+
+    // reset led
+    digitalWrite(BLUE_LED, LOW);
+    digitalWrite(GREEN_LED_RX, HIGH);
+    digitalWrite(YELLOW_LED_TX, HIGH);
+    digitalWrite(ORANGE_LED, LOW);
+    digitalWrite(AMBER_LED, LOW);
+    digitalWrite(RED_LED, LOW);
+
+    // set led
+    if (eq == DfMp3_Eq_Classic) digitalWrite(BLUE_LED, HIGH);
+    if (eq == DfMp3_Eq_Normal) digitalWrite(GREEN_LED_RX, LOW);
+    if (eq == DfMp3_Eq_Pop) digitalWrite(YELLOW_LED_TX, LOW);
+    if (eq == DfMp3_Eq_Rock) digitalWrite(ORANGE_LED, HIGH);
+    if (eq == DfMp3_Eq_Jazz) digitalWrite(AMBER_LED, HIGH);
+    if (eq == DfMp3_Eq_Bass) digitalWrite(RED_LED, HIGH);
+  }
+}
+
+static void decreaseEQ() {
+  ++eqcc;
+  if (!ledinit && eqcc > 2000) {
+    eqcc = 0;
+
+    switch(eq) {
+      case DfMp3_Eq_Classic:  eq = DfMp3_Eq_Bass;     break;
+      case DfMp3_Eq_Normal:   eq = DfMp3_Eq_Classic;  break;
+      case DfMp3_Eq_Pop:      eq = DfMp3_Eq_Normal;   break;
+      case DfMp3_Eq_Rock:     eq = DfMp3_Eq_Pop;      break;
+      case DfMp3_Eq_Jazz:     eq = DfMp3_Eq_Rock;     break;
+      case DfMp3_Eq_Bass:     eq = DfMp3_Eq_Jazz;     break;
+    }
+
+    setVolume();
+    mp3.setEq(eq);
+
+    digitalWrite(BLUE_LED, LOW);
+    digitalWrite(GREEN_LED_RX, HIGH);
+    digitalWrite(YELLOW_LED_TX, HIGH);
+    digitalWrite(ORANGE_LED, LOW);
+    digitalWrite(AMBER_LED, LOW);
+    digitalWrite(RED_LED, LOW);
+
+    if (eq == DfMp3_Eq_Classic) digitalWrite(BLUE_LED, HIGH);
+    if (eq == DfMp3_Eq_Normal) digitalWrite(GREEN_LED_RX, LOW);
+    if (eq == DfMp3_Eq_Pop) digitalWrite(YELLOW_LED_TX, LOW);
+    if (eq == DfMp3_Eq_Rock) digitalWrite(ORANGE_LED, HIGH);
+    if (eq == DfMp3_Eq_Jazz) digitalWrite(AMBER_LED, HIGH);
+    if (eq == DfMp3_Eq_Bass) digitalWrite(RED_LED, HIGH);
+  }
+}
+
 // MFRC522
 #define RST_PIN 9                 // Configurable, see typical pin layout above
 #define SS_PIN 10                 // Configurable, see typical pin layout above
@@ -171,7 +289,7 @@ MFRC522::StatusCode status;
 #define buttonDown A2
 #define busyPin 4
 
-#define LONG_PRESS 1000
+#define LONG_PRESS 300
 
 Button pauseButton(buttonPause);
 Button upButton(buttonUp);
@@ -184,19 +302,35 @@ uint8_t numberOfCards = 0;
 
 bool isPlaying() { return !digitalRead(busyPin); }
 
-#define CLK 5   // Pin B [D1]
-#define DATA 6  // Pin A [D0]
+#define LED_INIT_END  30
+
+#define CLK           6   // Pin B [D1]
+#define DATA          7   // Pin A [D0]
 
 uint32_t preMS = 0;  
-uint32_t waitMS = 300; 
+uint32_t waitMS = 150;
+
+uint32_t preLEDMS = 0;
+uint32_t waitLEDMS = 40;
 
 void setup() {
 
   pinMode(CLK, INPUT_PULLUP);
   pinMode(DATA, INPUT_PULLUP);
 
+  // LEDs
+  pinMode(BLUE_LED, OUTPUT);
+  pinMode(GREEN_LED_RX, OUTPUT);
+  pinMode(YELLOW_LED_TX, OUTPUT);
+  pinMode(ORANGE_LED, OUTPUT);
+  pinMode(AMBER_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(VOLUME_LED, OUTPUT);
+
+  #if DEBUG_VERBOSE_LEVEL >= 1
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle
                         // Schnittstelle
+  #endif
                        
   randomSeed(analogRead(A0)); // Zufallsgenerator initialisieren
 
@@ -213,7 +347,15 @@ void setup() {
 
   // DFPlayer Mini initialisieren
   mp3.begin();
-  mp3.setVolume(15);
+  mp3.setVolume(volume);
+  analogWrite(VOLUME_LED, volume << 3);
+
+  digitalWrite(BLUE_LED, LOW);
+  digitalWrite(GREEN_LED_RX, HIGH);
+  digitalWrite(YELLOW_LED_TX, HIGH);
+  digitalWrite(ORANGE_LED, LOW);
+  digitalWrite(AMBER_LED, LOW);
+  digitalWrite(RED_LED, LOW);
 
   // NFC Leser initialisieren
   SPI.begin();        // Init SPI bus
@@ -277,8 +419,10 @@ void loop() {
       if (ignorePauseButton == false) {
         if (isPlaying())
           mp3.pause();
-        else
+        else {
           mp3.start();
+          ledcc = LED_INIT_END; // Abort LED Init
+        }
       }
       ignorePauseButton = false;
     } else if (pauseButton.pressedFor(LONG_PRESS) &&
@@ -286,6 +430,7 @@ void loop() {
       if (isPlaying())
         mp3.playAdvertisement(currentTrack);
       else {
+        ledcc = LED_INIT_END; // Abort LED Init
         knownCard = false;
         mp3.playMp3FolderTrack(800);
         Serial.println(F("Karte resetten..."));
@@ -297,8 +442,8 @@ void loop() {
     }
 
     if (upButton.pressedFor(LONG_PRESS)) {
-      Serial.println(F("Volume Up"));
-      mp3.increaseVolume();
+      Serial.println(F("EQ Up"));
+      increaseEQ();
       ignoreUpButton = true;
     } else if (upButton.wasReleased()) {
       if (!ignoreUpButton)
@@ -308,8 +453,8 @@ void loop() {
     }
 
     if (downButton.pressedFor(LONG_PRESS)) {
-      Serial.println(F("Volume Down"));
-      mp3.decreaseVolume();
+      Serial.println(F("EQ Down"));
+      decreaseEQ();
       ignoreDownButton = true;
     } else if (downButton.wasReleased()) {
       if (!ignoreDownButton)
@@ -326,13 +471,13 @@ void loop() {
       if ( prevNextCode==0x0b) {
         //Serial.print("eleven ");
         //Serial.println(store,HEX);
-        mp3.increaseVolume();
+        increaseVolume();
       }
     
       if ( prevNextCode==0x07) {
         //Serial.print("seven ");
         //Serial.println(store,HEX);
-        mp3.decreaseVolume();
+        decreaseVolume();
       }
     }
 
@@ -341,6 +486,63 @@ void loop() {
     // give CPU time to do other stuff
     
     uint32_t curMS = millis();  
+
+    if (ledinit && (curMS - preLEDMS) > waitLEDMS) {
+      preLEDMS = curMS;
+      
+      waitLEDMS += 4;
+
+      if (ledcc == 0) digitalWrite(BLUE_LED, HIGH);
+      if (ledcc == 1) digitalWrite(GREEN_LED_RX, LOW);
+      if (ledcc == 2) digitalWrite(YELLOW_LED_TX, LOW);
+      if (ledcc == 3) digitalWrite(ORANGE_LED, HIGH);
+      if (ledcc == 4) digitalWrite(AMBER_LED, HIGH);
+      if (ledcc == 5) digitalWrite(RED_LED, HIGH);
+
+      if (ledcc == 6) digitalWrite(BLUE_LED, LOW);
+      if (ledcc == 7) digitalWrite(GREEN_LED_RX, HIGH);
+      if (ledcc == 8) digitalWrite(YELLOW_LED_TX, HIGH);
+      if (ledcc == 9) digitalWrite(ORANGE_LED, LOW);
+      if (ledcc == 10) digitalWrite(AMBER_LED, LOW);
+      if (ledcc == 11) digitalWrite(RED_LED, LOW);
+
+      if (ledcc == 17) digitalWrite(BLUE_LED, HIGH);
+      if (ledcc == 16) digitalWrite(GREEN_LED_RX, LOW);
+      if (ledcc == 15) digitalWrite(YELLOW_LED_TX, LOW);
+      if (ledcc == 14) digitalWrite(ORANGE_LED, HIGH);
+      if (ledcc == 13) digitalWrite(AMBER_LED, HIGH);
+      if (ledcc == 12) digitalWrite(RED_LED, HIGH);
+
+      if (ledcc > 17) {
+
+        if (ledcc == 18) waitLEDMS = 40;
+        
+        if (ledcc % 2 == 0) {
+          digitalWrite(BLUE_LED, LOW);
+          digitalWrite(GREEN_LED_RX, HIGH);
+          digitalWrite(YELLOW_LED_TX, HIGH);
+          digitalWrite(ORANGE_LED, LOW);
+          digitalWrite(AMBER_LED, LOW);
+          digitalWrite(RED_LED, LOW);
+        } else {
+          digitalWrite(BLUE_LED, HIGH);
+          digitalWrite(GREEN_LED_RX, LOW);
+          digitalWrite(YELLOW_LED_TX, LOW);
+          digitalWrite(ORANGE_LED, HIGH);
+          digitalWrite(AMBER_LED, HIGH);
+          digitalWrite(RED_LED, HIGH);
+        }
+      }
+
+      if (ledcc > 25) {
+        mp3.setEq(eq);
+        digitalWrite(GREEN_LED_RX, LOW);
+        ledinit = 0;
+      }
+
+      ledcc++;
+    }
+
     if ((curMS - preMS) > waitMS) {
       preMS = curMS;
 
@@ -352,6 +554,8 @@ void loop() {
 
   // RFID Karte wurde aufgelegt
 
+  ledcc = LED_INIT_END;
+
   if (!mfrc522.PICC_ReadCardSerial())
     return;
 
@@ -359,7 +563,6 @@ void loop() {
     if (myCard.cookie == 322417479 && myCard.folder != 0 && myCard.mode != 0) {
 
       knownCard = true;
-      _lastTrackFinished = 0;
       numTracksInFolder = mp3.getFolderTrackCount(myCard.folder);
       Serial.print(numTracksInFolder);
       Serial.print(F(" Dateien in Ordner "));
@@ -369,34 +572,38 @@ void loop() {
       if (myCard.mode == 1) {
         Serial.println(F("Hörspielmodus -> zufälligen Track wiedergeben"));
         currentTrack = random(1, numTracksInFolder + 1);
-        Serial.println(currentTrack);
-        mp3.playFolderTrack(myCard.folder, currentTrack);
       }
+      
       // Album Modus: kompletten Ordner spielen
       if (myCard.mode == 2) {
         Serial.println(F("Album Modus -> kompletten Ordner wiedergeben"));
         currentTrack = 1;
-        mp3.playFolderTrack(myCard.folder, currentTrack);
       }
+      
       // Party Modus: Ordner in zufälliger Reihenfolge
       if (myCard.mode == 3) {
         Serial.println(
             F("Party Modus -> Ordner in zufälliger Reihenfolge wiedergeben"));
         currentTrack = random(1, numTracksInFolder + 1);
-        mp3.playFolderTrack(myCard.folder, currentTrack);
       }
+      
       // Einzel Modus: eine Datei aus dem Ordner abspielen
       if (myCard.mode == 4) {
         Serial.println(
             F("Einzel Modus -> eine Datei aus dem Odrdner abspielen"));
         currentTrack = myCard.special;
-        mp3.playFolderTrack(myCard.folder, currentTrack);
       }
+      
       // Hörbuch Modus: kompletten Ordner spielen und Fortschritt merken
       if (myCard.mode == 5) {
         Serial.println(F("Hörbuch Modus -> kompletten Ordner spielen und "
                          "Fortschritt merken"));
         currentTrack = EEPROM.read(myCard.folder);
+      }
+
+      // validate track & play 
+      if (myCard.mode > 0 && myCard.mode < 6) {
+        if (currentTrack == 0 || currentTrack > numTracksInFolder) currentTrack = 1;
         mp3.playFolderTrack(myCard.folder, currentTrack);
       }
     }
